@@ -3,235 +3,72 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ibm-messaging/mq-golang/v5/ibmmq"
 )
 
 func main() {
-	var openOptions int32
-
-	var qMgrObject ibmmq.MQObject
-	var qObject ibmmq.MQObject
-	var managedQObject ibmmq.MQObject
-	var subObject ibmmq.MQObject
+	QueueManager := "QM1"
+	// QueueName := "DEV.QUEUE.1"
+	AppChannelName := "DEV.APP.SVRCONN"
+	Host := "127.0.0.1"
+	Port := "1414"
+	Username := "admin"
+	Password := "password"
+	MQConnStr := fmt.Sprintf("%s(%s)", Host, Port)
 
 	var qMgrName string
+	var err error
+	var qMgr ibmmq.MQQueueManager
+	var rc int
+	qMgrName = QueueManager
 
-	if len(os.Args) != 3 {
-		fmt.Println("mqitest <qname> <qmgrname>")
-		fmt.Println("  Both parms required")
-		os.Exit(1)
-	}
+	// Allocate the MQCNO and MQCD structures needed for the CONNX call.
+	cno := ibmmq.NewMQCNO()
+	cd := ibmmq.NewMQCD()
 
-	qMgrName = os.Args[2]
-	connected := false
-	qMgr, err := ibmmq.Conn(qMgrName)
-	if err != nil {
+	// Fill in required fields in the MQCD channel definition structure
+	cd.ChannelName = AppChannelName
+	cd.ConnectionName = MQConnStr
+
+	// Reference the CD structure from the CNO and indicate that we definitely want to
+	// use the client connection method.
+	cno.ClientConn = cd
+	cno.Options = ibmmq.MQCNO_CLIENT_BINDING
+
+	// MQ V9.1.2 allows applications to specify their own names. This is ignored
+	// by older levels of the MQ libraries.
+	cno.ApplName = "Golang ApplName"
+
+	// Also fill in the userid and password if the MQSAMP_USER_ID
+	// environment variable is set. This is the same variable used by the C
+	// sample programs such as amqsput shipped with the MQ product.
+
+	csp := ibmmq.NewMQCSP()
+	csp.AuthenticationType = ibmmq.MQCSP_AUTH_USER_ID_AND_PWD
+	csp.UserId = Username
+
+	// For simplicity (it doesn't help with understanding the MQ parts of this program)
+	// don't try to do anything special like turning off console echo for the password input
+	csp.Password = Password
+	// Make the CNO refer to the CSP structure so it gets used during the connection
+	cno.SecurityParms = csp
+
+	// And now we can try to connect. Wait a short time before disconnecting.
+	qMgr, err = ibmmq.Connx(qMgrName, cno)
+	if err == nil {
+		fmt.Printf("Connection to %s succeeded.\n", qMgrName)
+		d, _ := time.ParseDuration("3s")
+		time.Sleep(d)
+		qMgr.Disc() // Ignore errors from disconnect as we can't do much about it anyway
+		rc = 0
+	} else {
+		fmt.Printf("Connection to %s failed.\n", qMgrName)
 		fmt.Println(err)
-	} else {
-		connected = true
-		fmt.Println("Connected to queue manager ", qMgrName)
+		rc = int(err.(*ibmmq.MQReturn).MQCC)
 	}
 
-	// MQOPEN of the queue named on command line
-	if err == nil {
-		mqod := ibmmq.NewMQOD()
-
-		openOptions = ibmmq.MQOO_OUTPUT + ibmmq.MQOO_FAIL_IF_QUIESCING
-		openOptions |= ibmmq.MQOO_INPUT_AS_Q_DEF
-
-		mqod.ObjectType = ibmmq.MQOT_Q
-		mqod.ObjectName = os.Args[1]
-
-		qObject, err = qMgr.Open(mqod, openOptions)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			fmt.Println("Opened queue", qObject.Name)
-		}
-	}
-
-	// MQPUT a message
-	//   Create the standard MQI structures MQMD, MQPMO and
-	//   set the values.
-	// The message is always sent as bytes, so has to be converted
-	// before the MQPUT.
-	if err == nil {
-		putmqmd := ibmmq.NewMQMD()
-		pmo := ibmmq.NewMQPMO()
-
-		pmo.Options = ibmmq.MQPMO_SYNCPOINT | ibmmq.MQPMO_NEW_MSG_ID | ibmmq.MQPMO_NEW_CORREL_ID
-
-		putmqmd.Format = "MQSTR"
-		msgData := "Hello from Go at " + time.Now().Format("02 Jan 2006 03:04:05")
-		buffer := []byte(msgData)
-
-		err = qObject.Put(putmqmd, pmo, buffer)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			fmt.Println("Put message to", qObject.Name)
-		}
-	}
-
-	// The message was put in syncpoint so it needs
-	// to be committed.
-	if err == nil {
-		err = qMgr.Cmit()
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
-
-	// MQGET all messages on the queue. Wait 3 seconds for any more
-	// to arrive.
-	if err == nil {
-		msgAvail := true
-
-		for msgAvail == true {
-			var datalen int
-
-			getmqmd := ibmmq.NewMQMD()
-			gmo := ibmmq.NewMQGMO()
-			gmo.Options = ibmmq.MQGMO_NO_SYNCPOINT | ibmmq.MQGMO_FAIL_IF_QUIESCING
-			gmo.Options |= ibmmq.MQGMO_WAIT
-			gmo.WaitInterval = 3000
-			buffer := make([]byte, 32768)
-
-			datalen, err = qObject.Get(getmqmd, gmo, buffer)
-
-			if err != nil {
-				msgAvail = false
-				fmt.Println(err)
-				mqret := err.(*ibmmq.MQReturn)
-				if mqret.MQRC == ibmmq.MQRC_NO_MSG_AVAILABLE {
-					// not a real error so reset err
-					err = nil
-				}
-			} else {
-				fmt.Printf("Got message of length %d: ", datalen)
-				fmt.Println(strings.TrimSpace(string(buffer[:datalen])))
-			}
-		}
-	}
-
-	// MQCLOSE the queue
-	if err == nil {
-		err = qObject.Close(0)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			fmt.Println("Closed queue")
-		}
-	}
-
-	// This section demonstrates subscribing to a topic
-	// where the topic string is set to collect activity trace
-	// from this program - it needs MQ V9 for publications to
-	// automatically be generated on this topic.
-	if err == nil {
-		mqsd := ibmmq.NewMQSD()
-		mqsd.Options = ibmmq.MQSO_CREATE
-		mqsd.Options |= ibmmq.MQSO_NON_DURABLE
-		mqsd.Options |= ibmmq.MQSO_FAIL_IF_QUIESCING
-		mqsd.Options |= ibmmq.MQSO_MANAGED
-		mqsd.ObjectString = "$SYS/MQ/INFO/QMGR/" + qMgrName + "/ActivityTrace/ApplName/mqitest"
-
-		subObject, err = qMgr.Sub(mqsd, &managedQObject)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			fmt.Println("Subscribed to topic ", mqsd.ObjectString)
-		}
-	}
-
-	// Loop on the managed queue created by the MQSUB call until there
-	// are no more messages. Because these are going to be PCF-format
-	// events, they cannot be simply printed so here I'm just
-	// printing the format of the message to show that something has
-	// been retrieved.
-	if err == nil {
-		msgAvail := true
-
-		for msgAvail == true {
-			var datalen int
-
-			getmqmd := ibmmq.NewMQMD()
-			gmo := ibmmq.NewMQGMO()
-			gmo.Options = ibmmq.MQGMO_NO_SYNCPOINT | ibmmq.MQGMO_FAIL_IF_QUIESCING
-			gmo.Options |= ibmmq.MQGMO_WAIT
-			gmo.WaitInterval = 3000
-			buffer := make([]byte, 32768)
-
-			datalen, err = managedQObject.Get(getmqmd, gmo, buffer)
-
-			if err != nil {
-				msgAvail = false
-				fmt.Println(err)
-				mqret := err.(*ibmmq.MQReturn)
-				if mqret.MQRC == ibmmq.MQRC_NO_MSG_AVAILABLE {
-					// not a real error so reset err, but
-					// end retrieval loop
-					err = nil
-				}
-			} else {
-				fmt.Printf("Got message of length %d. Format = %s\n", datalen, getmqmd.Format)
-			}
-		}
-	}
-
-	// MQCLOSE the subscription, ignoring errors.
-	if err == nil {
-		subObject.Close(0)
-	}
-
-	if err == nil {
-		mqod := ibmmq.NewMQOD()
-		openOptions = ibmmq.MQOO_INQUIRE + ibmmq.MQOO_FAIL_IF_QUIESCING
-
-		mqod.ObjectType = ibmmq.MQOT_Q_MGR
-		mqod.ObjectName = ""
-
-		qMgrObject, err = qMgr.Open(mqod, openOptions)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			fmt.Printf("Opened QMgr for MQINQ\n")
-		}
-	}
-
-	if err == nil {
-		selectors := []int32{ibmmq.MQCA_Q_MGR_NAME,
-			ibmmq.MQCA_DEAD_LETTER_Q_NAME,
-			ibmmq.MQIA_MSG_MARK_BROWSE_INTERVAL}
-
-		values, err := qMgrObject.Inq(selectors)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			returnedName := values[ibmmq.MQCA_Q_MGR_NAME]
-			fmt.Printf("MQINQ returned %v \n", values)
-			fmt.Printf("        QM is '%s'\n", returnedName)
-		}
-
-	}
-
-	// MQDISC regardless of other errors
-	if connected {
-		err = qMgr.Disc()
-		fmt.Println("Disconnected from queue manager ", qMgrName)
-	}
-
-	if err == nil {
-		os.Exit(0)
-	} else {
-		mqret := err.(*ibmmq.MQReturn)
-		os.Exit((int)(mqret.MQCC))
-	}
+	fmt.Println("Done.")
+	os.Exit(rc)
 }

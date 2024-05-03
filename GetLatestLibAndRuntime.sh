@@ -32,5 +32,5 @@ fi
 # the genmqpkg.sh will generate a smaller runtime dist package and delete other non required shit
 
 tar -zxf ./*.tar.gz \
-  && bin/genmqpkg.sh -b ../$runtimeFolder
+  && genmqpkg_inctls=1 genmqpkg_incsdk=1 genmqpkg_incnls=1 bin/genmqpkg.sh -b ../$runtimeFolder
 
