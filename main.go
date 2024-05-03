@@ -11,7 +11,7 @@ import (
 func main() {
 	QueueManager := "QM1"
 	// QueueName := "DEV.QUEUE.1"
-	AppChannelName := "DEV.APP.SVRCONN"
+	AppChannelName := "DEV.ADMIN.SVRCONN"
 	Host := "127.0.0.1"
 	Port := "1414"
 	Username := "admin"
@@ -59,7 +59,7 @@ func main() {
 	qMgr, err = ibmmq.Connx(qMgrName, cno)
 	if err == nil {
 		fmt.Printf("Connection to %s succeeded.\n", qMgrName)
-		d, _ := time.ParseDuration("3s")
+		d, _ := time.ParseDuration("30s")
 		time.Sleep(d)
 		qMgr.Disc() // Ignore errors from disconnect as we can't do much about it anyway
 		rc = 0
