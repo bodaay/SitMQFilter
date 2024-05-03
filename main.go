@@ -11,7 +11,7 @@ import (
 func main() {
 	QueueManager := "QM1"
 	// QueueName := "DEV.QUEUE.1"
-	AppChannelName := "DEV.ADMIN.SVRCONN"
+	AppChannelName := "DEV.ADMIN.SVRCONN" //DEV.ADMIN.SVRCONN, if you want to use this, username should be app, and the password same as what I set in docker MQ_APP_PASSWORD
 	Host := "127.0.0.1"
 	Port := "1414"
 	Username := "admin"
